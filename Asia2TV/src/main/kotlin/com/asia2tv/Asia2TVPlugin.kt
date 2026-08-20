@@ -9,6 +9,4 @@ class Asia2TVPlugin : Plugin() {
     override fun load(context: Context) {
         registerMainAPI(Asia2TV())
     }
-
-    override var repositoryUrl: String = "https://drivesalem307.github.io/RunnerCloudStreamNew"
 }
