@@ -135,19 +135,31 @@ class Asia2TV : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val doc = app.get(data).document
+        // تجربة جلب الصفحة باستخدام خيارات الرأس القياسية لتجنب الحجب
+        val doc = app.get(
+            data,
+            headers = mapOf(
+                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer" to mainUrl
+            )
+        ).document
 
-        doc.select("iframe").forEach { iframe ->
+        // البحث عن سيرفرات التشغيل المخفية أو الأطر (iframes)
+        val sources = doc.select("iframe, source, option[value*='http'], a[href*='embed']")
+
+        sources.forEach { element ->
             val src = fixUrlNull(
-                iframe.attr("src")
+                element.attr("src").ifEmpty { element.attr("value").ifEmpty { element.attr("href") } }
             ) ?: return@forEach
 
-            loadExtractor(
-                src,
-                data,
-                subtitleCallback,
-                callback
-            )
+            if (src.startsWith("http")) {
+                loadExtractor(
+                    src,
+                    data,
+                    subtitleCallback,
+                    callback
+                )
+            }
         }
 
         return true
