@@ -3,6 +3,7 @@ package com.arabrunners
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Element
+import org.json.JSONObject
 
 class ArabRunners : MainAPI() {
     override var mainUrl = "https://www.arabrunnersteam.org"
@@ -91,22 +92,22 @@ class ArabRunners : MainAPI() {
     ): Boolean {
         val doc = app.get(data).document
 
-        // البحث عن جميع الروابط الخارجية وسطحة المشغلات بالصفحة
-        val allElements = doc.select("a[href], iframe[src]")
+        // جمع كافة العناصر التي تحتمل وجود روابط (روابط عادية وإطارات iframe)
+        val elements = doc.select("a[href], iframe[src]")
 
-        for (element in allElements) {
+        for (element in elements) {
             val rawUrl = fixUrlNull(element.attr("href").ifEmpty { element.attr("src") }) ?: continue
             var targetUrl = rawUrl
 
-            // تجاوز اختصار Linkvertise برمجياً وإرجاع الرابط الأصلي
-            if (targetUrl.contains("linkvertise.com") || targetUrl.contains("link-to.net") || targetUrl.contains("up-to-down.net") || targetUrl.contains("direct-link.net")) {
+            // إذا كان الرابط يخص Linkvertise ونطاقاته المشابهة
+            if (isLinkvertiseUrl(targetUrl)) {
                 val bypassedUrl = bypassLinkvertise(targetUrl)
                 if (bypassedUrl != null) {
                     targetUrl = bypassedUrl
                 }
             }
 
-            // استخراج وتمرير روابط المشغلات المباشرة (Yandex, Drive, Mega, etc.)
+            // تمرير الرابط للمستخرج للتجربة
             loadExtractor(targetUrl, data, subtitleCallback, callback)
         }
 
@@ -122,19 +123,40 @@ class ArabRunners : MainAPI() {
         return true
     }
 
-    // دالة التجاوز التلقائي لفك اختصار Linkvertise عبر API مجاني
+    private fun isLinkvertiseUrl(url: String): Boolean {
+        return url.contains("linkvertise.com") || 
+               url.contains("link-to.net") || 
+               url.contains("up-to-down.net") || 
+               url.contains("direct-link.net") ||
+               url.contains("linkvertise.net")
+    }
+
+    // دالة تجاوز الاختصار المحدثة باستخدام عدة خدمات فك آمنة
     private suspend fun bypassLinkvertise(url: String): String? {
-        return try {
-            val apiUrl = "https://bypass.city/api/bypass?url=$url"
-            val response = app.get(apiUrl).text
-            val destination = response.substringAfter("\"destination\":\"").substringBefore("\"")
-            if (destination.isNotEmpty() && destination.startsWith("http")) {
-                destination.replace("\\/", "/")
-            } else {
-                null
+        // المحاولة الأولى: استخدام API bypass.vip
+        try {
+            val apiUrl = "https://api.bypass.vip/bypass?url=${url}"
+            val responseText = app.get(apiUrl).text
+            val json = JSONObject(responseText)
+            if (json.optBoolean("success", false)) {
+                val destination = json.optString("destination", "")
+                if (destination.isNotEmpty() && destination.startsWith("http")) {
+                    return destination
+                }
             }
-        } catch (e: Exception) {
-            null
-        }
+        } catch (_: Exception) {}
+
+        // المحاولة الثانية: استخدام API bypass.city
+        try {
+            val apiUrl = "https://bypass.city/api/bypass?url=${url}"
+            val responseText = app.get(apiUrl).text
+            val json = JSONObject(responseText)
+            val destination = json.optString("destination", "")
+            if (destination.isNotEmpty() && destination.startsWith("http")) {
+                return destination
+            }
+        } catch (_: Exception) {}
+
+        return null
     }
 }
