@@ -2,13 +2,7 @@ package com.asia2tv
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-
-@CloudstreamPlugin
-class Asia2TVPlugin : Plugin() {
-    override fun load(context: Context) {
-        registerMainAPI(Asia2TV())
-    }
-}
+import org.jsoup.nodes.Element
 
 class Asia2TV : MainAPI() {
 
@@ -27,28 +21,41 @@ class Asia2TV : MainAPI() {
         request: MainPageRequest
     ): HomePageResponse {
         val doc = app.get(mainUrl).document
-
         val items = doc.select(
             "article, div.post-item, .post-main"
-        ).mapNotNull { it.toSearchResult() }
+        ).mapNotNull {
+            it.toSearchResult()
+        }
 
-        return newHomePageResponse(
-            HomePageList("أحدث المسلسلات", items)
-        )
+        val categories = ArrayList<HomePageList>()
+
+        if (items.isNotEmpty()) {
+            categories.add(
+                HomePageList("أحدث المسلسلات", items)
+            )
+        }
+
+        return newHomePageResponse(categories)
     }
 
-    private fun org.jsoup.nodes.Element.toSearchResult(): SearchResponse? {
+    private fun Element.toSearchResult(): SearchResponse? {
         val link = select("a").firstOrNull() ?: return null
-        val href = fixUrlNull(link.attr("href")) ?: return null
 
-        val title = select(".title, h2, h3")
-            .text()
-            .trim()
-            .ifEmpty { link.text().trim() }
+        val href = fixUrlNull(
+            link.attr("href")
+        ) ?: return null
+
+        val title = select(
+            ".title, h2, h3"
+        ).text().trim().ifEmpty {
+            link.text().trim()
+        }
 
         if (title.isBlank()) return null
 
-        val poster = fixUrlNull(select("img").attr("src"))
+        val poster = fixUrlNull(
+            select("img").attr("src")
+        )
 
         return newTvSeriesSearchResponse(
             title,
@@ -59,47 +66,78 @@ class Asia2TV : MainAPI() {
         }
     }
 
-    override suspend fun search(query: String): List<SearchResponse> {
-        val encoded = java.net.URLEncoder.encode(query, "UTF-8")
-        val doc = app.get("$mainUrl/?s=$encoded").document
+    override suspend fun search(
+        query: String
+    ): List<SearchResponse> {
+
+        val doc = app.get(
+            "$mainUrl/?s=$query"
+        ).document
 
         return doc.select(
             "article, div.post-item, .post-main"
-        ).mapNotNull { it.toSearchResult() }
+        ).mapNotNull {
+            it.toSearchResult()
+        }
     }
 
-    override suspend fun load(url: String): LoadResponse {
+    override suspend fun load(
+        url: String
+    ): LoadResponse {
+
         val doc = app.get(url).document
 
         val title = doc.select(
-            "h1.entry-title, .post-title, h1"
-        ).firstOrNull()?.text()?.trim() ?: "Asia2TV"
+            "h1, h2.post-title, .entry-title"
+        ).firstOrNull()?.text()?.trim()
+            ?: "Asia2TV"
 
         val poster = fixUrlNull(
-            doc.select(".poster img, .entry-content img").attr("src")
+            doc.select(
+                ".poster img, .entry-content img, article img"
+            ).firstOrNull()?.attr("src")
         )
 
         val description = doc.select(
-            ".entry-content, .story"
+            ".entry-content, .story, .post-content"
         ).text().trim()
 
         val episodes = ArrayList<Episode>()
 
-        doc.select(
-            "a[href*='/episode/'], a[href*='episode'], .episodes-list a"
-        ).forEachIndexed { index, element ->
+        val episodeLinks = doc.select(
+            "a[href*='/episode/'], " +
+            "a[href*='episode'], " +
+            ".episodes-list a"
+        )
 
-            val epUrl = fixUrlNull(element.attr("href"))
-                ?: return@forEachIndexed
+        if (episodeLinks.isNotEmpty()) {
 
-            val epName = element.text()
-                .trim()
-                .ifEmpty { "الحلقة ${index + 1}" }
+            episodeLinks.forEachIndexed { index, element ->
+
+                val epUrl = fixUrlNull(
+                    element.attr("href")
+                ) ?: return@forEachIndexed
+
+                val epName = element.text()
+                    .trim()
+                    .ifEmpty {
+                        "الحلقة ${index + 1}"
+                    }
+
+                episodes.add(
+                    newEpisode(epUrl) {
+                        name = epName
+                        episode = index + 1
+                    }
+                )
+            }
+
+        } else {
 
             episodes.add(
-                newEpisode(epUrl) {
-                    name = epName
-                    episode = index + 1
+                newEpisode(url) {
+                    name = title
+                    episode = 1
                 }
             )
         }
@@ -117,35 +155,27 @@ class Asia2TV : MainAPI() {
 
     override suspend fun loadLinks(
         data: String,
-        isCasting: Boolean,
+        isCdn: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
 
         val doc = app.get(data).document
-        var found = false
 
-        doc.select(
-            "iframe, a[href*='/embed/'], a[href*='/watch/']"
-        ).forEach { element ->
+        doc.select("iframe").forEach { iframe ->
 
-            val rawUrl = element.attr("src")
-                .ifBlank { element.attr("data-src") }
-                .ifBlank { element.attr("href") }
-
-            val url = fixUrlNull(rawUrl)
-                ?: return@forEach
-
-            found = true
+            val src = fixUrlNull(
+                iframe.attr("src")
+            ) ?: return@forEach
 
             loadExtractor(
-                url,
+                src,
                 data,
                 subtitleCallback,
                 callback
             )
         }
 
-        return found
+        return true
     }
 }
