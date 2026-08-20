@@ -26,7 +26,7 @@ class ArabRunners : MainAPI() {
             homeCategories.add(HomePageList("أحدث المشاركات", items))
         }
 
-        return HomePageResponse(homeCategories)
+        return newHomePageResponse(homeCategories)
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
@@ -62,20 +62,18 @@ class ArabRunners : MainAPI() {
                 val epUrl = fixUrlNull(el.attr("href")) ?: return@forEachIndexed
                 val epName = el.text().trim().ifEmpty { "الحلقة ${index + 1}" }
                 episodes.add(
-                    Episode(
-                        data = epUrl,
-                        name = epName,
-                        episode = index + 1
-                    )
+                    newEpisode(epUrl) {
+                        this.name = epName
+                        this.episode = index + 1
+                    }
                 )
             }
         } else {
             episodes.add(
-                Episode(
-                    data = url,
-                    name = title,
-                    episode = 1
-                )
+                newEpisode(url) {
+                    this.name = title
+                    this.episode = 1
+                }
             )
         }
 
