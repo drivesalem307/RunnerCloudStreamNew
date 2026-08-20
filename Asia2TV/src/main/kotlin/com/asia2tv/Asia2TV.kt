@@ -21,6 +21,7 @@ class Asia2TV : MainAPI() {
         request: MainPageRequest
     ): HomePageResponse {
         val doc = app.get(mainUrl).document
+
         val items = doc.select(
             "article, div.post-item, .post-main"
         ).mapNotNull {
@@ -31,7 +32,7 @@ class Asia2TV : MainAPI() {
 
         if (items.isNotEmpty()) {
             categories.add(
-                HomePageList("أحدث المسلسلات", items)
+                HomePageList("Asia2TV", items)
             )
         }
 
@@ -69,7 +70,6 @@ class Asia2TV : MainAPI() {
     override suspend fun search(
         query: String
     ): List<SearchResponse> {
-
         val doc = app.get(
             "$mainUrl/?s=$query"
         ).document
@@ -88,7 +88,7 @@ class Asia2TV : MainAPI() {
         val doc = app.get(url).document
 
         val title = doc.select(
-            "h1, h2.post-title, .entry-title"
+            "h1.entry-title, .post-title, h1"
         ).firstOrNull()?.text()?.trim()
             ?: "Asia2TV"
 
@@ -118,15 +118,14 @@ class Asia2TV : MainAPI() {
                     element.attr("href")
                 ) ?: return@forEachIndexed
 
-                val epName = element.text()
-                    .trim()
-                    .ifEmpty {
-                        "الحلقة ${index + 1}"
-                    }
-
                 episodes.add(
                     newEpisode(epUrl) {
-                        name = epName
+                        name = element.text()
+                            .trim()
+                            .ifEmpty {
+                                "الحلقة ${index + 1}"
+                            }
+
                         episode = index + 1
                     }
                 )
