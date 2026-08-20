@@ -10,10 +10,37 @@ class Asia2TV : MainAPI() {
     override var lang = "ar"
     override val hasMainPage = true
 
+    // 1. تفعيل خيار تسجيل الدخول بالحساب في إعدادات الإضافة
+    override val hasOAuth = true 
+
     override val supportedTypes = setOf(
         TvType.AsianDrama,
         TvType.TvSeries
     )
+
+    // 2. دالة تسجيل الدخول عبر واجهة CloudStream
+    override suspend fun login(credentials: AuthCredentials): Boolean {
+        return try {
+            val loginUrl = "$mainUrl/wp-login.php"
+            
+            // إرسال طلب تسجيل الدخول بالحساب والكلمة المرورية المقدمة من المستخدم
+            val response = app.post(
+                loginUrl,
+                data = mapOf(
+                    "log" to credentials.account,
+                    "pwd" to credentials.password,
+                    "wp-submit" to "Log In",
+                    "redirect_to" to mainUrl,
+                    "testcookie" to "1"
+                )
+            )
+
+            // عند نجاح تسجيل الدخول تحفظ مكتبة NiceHttp الكوكيز والجلسة تلقائياً
+            response.isSuccessful
+        } catch (e: Exception) {
+            false
+        }
+    }
 
     override suspend fun getMainPage(
         page: Int,
@@ -95,7 +122,6 @@ class Asia2TV : MainAPI() {
 
         if (episodeLinks.isNotEmpty()) {
             episodeLinks.forEachIndexed { index, element ->
-
                 val epUrl = fixUrlNull(
                     element.attr("href")
                 ) ?: return@forEachIndexed
@@ -136,7 +162,7 @@ class Asia2TV : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-
+        // يتم إجراء الطلب بالجلسة والكوكيز المحفوظة تلقائياً عند تسجيل الدخول
         val doc = app.get(data).document
 
         doc.select("iframe").forEach { iframe ->
