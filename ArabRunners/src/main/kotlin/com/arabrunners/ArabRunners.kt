@@ -5,7 +5,7 @@ import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Element
 
 class ArabRunners : MainAPI() {
-    override var mainUrl = "https://arabrunnersteam.org"
+    override var mainUrl = "https://www.arabrunnersteam.org"
     override var name = "Arab Runners"
     override var lang = "ar"
     override val hasMainPage = true
