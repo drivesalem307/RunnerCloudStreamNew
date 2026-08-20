@@ -27,10 +27,15 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew make makePluginsJson
+          mkdir -p build
+          find . -type f -name "*.cs3" -exec cp {} build/ \;
 
       - name: Show build output
         run: |
-          find . -type f \( -name "*.cs3" -o -name "plugins.json" \)
+          echo "=== CS3 FILES ==="
+          find . -type f -name "*.cs3"
+          echo "=== PLUGINS JSON ==="
+          find . -type f -name "plugins.json"
 
       - name: Deploy to builds branch
         uses: peaceiris/actions-gh-pages@v3
