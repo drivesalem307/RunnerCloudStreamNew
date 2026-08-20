@@ -2,11 +2,9 @@ package com.asia2tv
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.AuthAPI
-import com.lagradost.cloudstream3.AuthCredentials
 import org.jsoup.nodes.Element
 
-class Asia2TV : MainAPI(), AuthAPI {
+class Asia2TV : MainAPI() {
     override var mainUrl = "https://asia2tv.com"
     override var name = "Asia2TV"
     override var lang = "ar"
@@ -16,26 +14,6 @@ class Asia2TV : MainAPI(), AuthAPI {
         TvType.AsianDrama,
         TvType.TvSeries
     )
-
-    // دالة تسجيل الدخول الخاصة بـ AuthAPI
-    override suspend fun login(credentials: AuthCredentials): Boolean {
-        return try {
-            val loginUrl = "$mainUrl/wp-login.php"
-            val response = app.post(
-                loginUrl,
-                data = mapOf(
-                    "log" to credentials.account,
-                    "pwd" to credentials.password,
-                    "wp-submit" to "Log In",
-                    "redirect_to" to mainUrl,
-                    "testcookie" to "1"
-                )
-            )
-            response.isSuccessful
-        } catch (e: Exception) {
-            false
-        }
-    }
 
     override suspend fun getMainPage(
         page: Int,
