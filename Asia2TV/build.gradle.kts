@@ -10,7 +10,3 @@ android {
         minSdk = 21
     }
 }
-
-cloudstream {
-    repoUrl = "https://drivesalem307.github.io/RunnerCloudStreamNew"
-}
