@@ -91,11 +91,26 @@ class ArabRunners : MainAPI() {
     ): Boolean {
         val doc = app.get(data).document
 
-        doc.select("iframe").forEach { iframe ->
-            val src = fixUrlNull(iframe.attr("src")) ?: return@forEach
-            loadExtractor(src, data, subtitleCallback, callback)
+        // البحث عن جميع الروابط الخارجية وسطحة المشغلات بالصفحة
+        val allElements = doc.select("a[href], iframe[src]")
+
+        for (element in allElements) {
+            val rawUrl = fixUrlNull(element.attr("href").ifEmpty { element.attr("src") }) ?: continue
+            var targetUrl = rawUrl
+
+            // تجاوز اختصار Linkvertise برمجياً وإرجاع الرابط الأصلي
+            if (targetUrl.contains("linkvertise.com") || targetUrl.contains("link-to.net") || targetUrl.contains("up-to-down.net") || targetUrl.contains("direct-link.net")) {
+                val bypassedUrl = bypassLinkvertise(targetUrl)
+                if (bypassedUrl != null) {
+                    targetUrl = bypassedUrl
+                }
+            }
+
+            // استخراج وتمرير روابط المشغلات المباشرة (Yandex, Drive, Mega, etc.)
+            loadExtractor(targetUrl, data, subtitleCallback, callback)
         }
 
+        // استخراج ملفات الترجمة
         doc.select("a[href*=.srt], a[href*=.vtt], a[href*=.ass], a[href*=/file/]").forEach { sub ->
             val subUrl = fixUrlNull(sub.attr("href")) ?: return@forEach
             val subName = sub.text().trim()
@@ -105,5 +120,21 @@ class ArabRunners : MainAPI() {
         }
 
         return true
+    }
+
+    // دالة التجاوز التلقائي لفك اختصار Linkvertise عبر API مجاني
+    private suspend fun bypassLinkvertise(url: String): String? {
+        return try {
+            val apiUrl = "https://bypass.city/api/bypass?url=$url"
+            val response = app.get(apiUrl).text
+            val destination = response.substringAfter("\"destination\":\"").substringBefore("\"")
+            if (destination.isNotEmpty() && destination.startsWith("http")) {
+                destination.replace("\\/", "/")
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 }
