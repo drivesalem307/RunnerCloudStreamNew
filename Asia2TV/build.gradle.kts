@@ -5,5 +5,12 @@ plugins {
 }
 
 android {
-    namespace = "com.asia2tv"
+    compileSdk = 33
+    defaultConfig {
+        minSdk = 21
+    }
+}
+
+cloudstream {
+    setRepoUrl("https://drivesalem307.github.io/RunnerCloudStreamNew")
 }
