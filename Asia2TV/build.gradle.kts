@@ -12,5 +12,5 @@ android {
 }
 
 cloudstream {
-    setRepoUrl("https://drivesalem307.github.io/RunnerCloudStreamNew")
+    repoUrl = "https://drivesalem307.github.io/RunnerCloudStreamNew"
 }
