@@ -2,28 +2,25 @@ package com.asia2tv
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.AuthAPI
+import com.lagradost.cloudstream3.AuthCredentials
 import org.jsoup.nodes.Element
 
-class Asia2TV : MainAPI() {
+class Asia2TV : MainAPI(), AuthAPI {
     override var mainUrl = "https://asia2tv.com"
     override var name = "Asia2TV"
     override var lang = "ar"
     override val hasMainPage = true
-
-    // 1. تفعيل خيار تسجيل الدخول بالحساب في إعدادات الإضافة
-    override val hasOAuth = true 
 
     override val supportedTypes = setOf(
         TvType.AsianDrama,
         TvType.TvSeries
     )
 
-    // 2. دالة تسجيل الدخول عبر واجهة CloudStream
+    // دالة تسجيل الدخول الخاصة بـ AuthAPI
     override suspend fun login(credentials: AuthCredentials): Boolean {
         return try {
             val loginUrl = "$mainUrl/wp-login.php"
-            
-            // إرسال طلب تسجيل الدخول بالحساب والكلمة المرورية المقدمة من المستخدم
             val response = app.post(
                 loginUrl,
                 data = mapOf(
@@ -34,8 +31,6 @@ class Asia2TV : MainAPI() {
                     "testcookie" to "1"
                 )
             )
-
-            // عند نجاح تسجيل الدخول تحفظ مكتبة NiceHttp الكوكيز والجلسة تلقائياً
             response.isSuccessful
         } catch (e: Exception) {
             false
@@ -162,7 +157,6 @@ class Asia2TV : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // يتم إجراء الطلب بالجلسة والكوكيز المحفوظة تلقائياً عند تسجيل الدخول
         val doc = app.get(data).document
 
         doc.select("iframe").forEach { iframe ->
