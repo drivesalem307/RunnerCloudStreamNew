@@ -5,8 +5,12 @@ plugins {
 }
 
 android {
-    compileSdk = 35
+    compileSdk = 33
     defaultConfig {
         minSdk = 21
     }
+}
+
+cloudstream {
+    setRepoUrl("https://drivesalem307.github.io/RunnerCloudStreamNew")
 }
