@@ -312,6 +312,7 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
         }
 
         var foundAny = false
+        var foundCount = 0
 
         val ajaxHeaders = HashMap<String, String>()
         ajaxHeaders["X-Requested-With"] = "XMLHttpRequest"
@@ -375,6 +376,7 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
 
                 diagLines.add("[$serverName] ✅ رابط سليم: $src")
                 foundAny = true
+                foundCount++
                 loadExtractor(src, data, subtitleCallback, callback)
                 // ملاحظة: ما نوقف هنا (لا break) — نكمل باقي السيرفرات المجانية
             } catch (e: Exception) {
@@ -383,9 +385,8 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
             }
         }
 
-        if (!foundAny) {
-            showDiagnosticDialog("فشل تحميل كل السيرفرات", diagLines)
-        }
+        val resultTitle = if (foundAny) "تم إيجاد $foundCount سيرفر شغال" else "فشل تحميل كل السيرفرات"
+        showDiagnosticDialog(resultTitle, diagLines)
 
         return foundAny
     }
