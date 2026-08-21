@@ -81,9 +81,13 @@ object Asia2TVAuth {
 
             // 2) موقع Laravel يحتاج X-XSRF-TOKEN بالهيدر، مأخوذ من كوكي XSRF-TOKEN (مفكوك الترميز)
             val xsrfCookie = initialCookies["XSRF-TOKEN"]
-            val headers = if (xsrfCookie != null) {
-                mapOf("X-XSRF-TOKEN" to URLDecoder.decode(xsrfCookie, "UTF-8"))
-            } else emptyMap()
+            val headers = HashMap<String, String>()
+            if (xsrfCookie != null) {
+                headers["X-XSRF-TOKEN"] = URLDecoder.decode(xsrfCookie, "UTF-8")
+            }
+            // نقلد طلب المتصفح الفعلي (AJAX/XHR) اللي يظهر بأدوات المطور
+            headers["X-Requested-With"] = "XMLHttpRequest"
+            headers["Accept"] = "application/json, text/plain, */*"
 
             // 3) نرسل تسجيل الدخول
             val loginResponse = app.post(
@@ -98,6 +102,14 @@ object Asia2TVAuth {
             val finalCookies = initialCookies + loginResponse.cookies
             if (finalCookies.isEmpty()) {
                 return Asia2TVLoginResult(false, emptyMap(), "لم يتم استلام أي كوكيز من السيرفر")
+            }
+
+            // معلومات تشخيصية: كود الحالة وأول جزء من رد السيرفر على طلب الدخول نفسه
+            val postStatus = loginResponse.code
+            val postBodySnippet = try {
+                loginResponse.text.take(200)
+            } catch (e: Exception) {
+                "تعذر قراءة الرد"
             }
 
             // 4) نتحقق فعليًا: نفتح الصفحة الرئيسية بنفس الكوكيز ونشوف فيه أثر لتسجيل الدخول
@@ -117,7 +129,7 @@ object Asia2TVAuth {
                 Asia2TVLoginResult(
                     false,
                     finalCookies,
-                    "تم إرسال الطلب لكن يبدو إن الدخول فشل (تحقق من اسم المستخدم/كلمة المرور)"
+                    "فشل الدخول | كود الرد: $postStatus | مقتطف: $postBodySnippet"
                 )
             }
         } catch (e: Exception) {
@@ -304,3 +316,4 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
         return true
     }
 }
+ 
