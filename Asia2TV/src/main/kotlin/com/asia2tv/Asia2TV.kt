@@ -118,27 +118,30 @@ object Asia2TVAuth {
             val postHasPasswordField = postDoc?.select("input[type=password]")?.isNotEmpty() ?: false
             val postFinalUrl = try { loginResponse.url } catch (e: Exception) { "غير معروف" }
 
-            // 4) نتحقق فعليًا: نفتح الصفحة الرئيسية بنفس الكوكيز ونشوف فيه أثر لتسجيل الدخول
+            // الدليل الأقوى: Laravel يغيّر معرف الجلسة (session) تلقائيًا بعد نجاح تسجيل الدخول
+            // (session regenerate). لو القيمة تغيّرت، الدخول نجح فعليًا بغض النظر عن شكل الصفحة.
+            val sessionBefore = initialCookies["asia2tvcom_session"]
+            val sessionAfter = finalCookies["asia2tvcom_session"]
+            val sessionChanged = sessionBefore != null && sessionAfter != null && sessionBefore != sessionAfter
+
+            // 4) نتحقق أيضًا من محتوى الصفحة الرئيسية كدليل إضافي (مو أساسي)
             val checkDoc = app.get(MAIN_URL, cookies = finalCookies).document
             val pageText = checkDoc.text()
             val checkTitle = checkDoc.title()
 
-            val loggedIn = checkDoc.select("a[href*=logout], a[href*='تسجيل-خروج']").isNotEmpty() ||
+            val hasLogoutHint = checkDoc.select("a[href*=logout], a[href*='تسجيل-خروج']").isNotEmpty() ||
                 pageText.contains("تسجيل خروج") ||
                 pageText.contains("تسجيل الخروج")
-
-            val stillOnLoginForm = checkDoc.select("form input[type=password]").isNotEmpty()
 
             val diagInfo2 = "رابط نهائي بعد الدخول: $postFinalUrl\n" +
                 "عنوان صفحة رد الدخول: $postTitle\n" +
                 "فيها حقل باسورد؟: $postHasPasswordField\n" +
-                "عنوان الصفحة الرئيسية بعدها: $checkTitle\n" +
-                "لقينا رابط خروج؟: $loggedIn\n" +
-                "لسا فيه فورم دخول بالرئيسية؟: $stillOnLoginForm"
+                "تغيّر معرف الجلسة (الدليل الأهم): $sessionChanged\n" +
+                "لقينا رابط خروج بالواجهة؟: $hasLogoutHint"
 
-            return if (loggedIn && !stillOnLoginForm) {
+            return if (sessionChanged || hasLogoutHint) {
                 saveCookies(context, finalCookies)
-                Asia2TVLoginResult(true, finalCookies, "تم تسجيل الدخول بنجاح")
+                Asia2TVLoginResult(true, finalCookies, "تم تسجيل الدخول بنجاح ✅\n\n$diagInfo2")
             } else {
                 Asia2TVLoginResult(
                     false,
@@ -330,3 +333,4 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
         return true
     }
 }
+ 
