@@ -4,6 +4,127 @@ import android.content.Context
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Element
+import java.net.URLDecoder
+
+/**
+ * نتيجة محاولة تسجيل الدخول: الكوكيز الناتجة (فاضية = فشل)
+ */
+data class Asia2TVLoginResult(
+    val success: Boolean,
+    val cookies: Map<String, String>,
+    val message: String
+)
+
+/**
+ * منطق تسجيل الدخول مشترك بين الـ Provider وشاشة الإعدادات،
+ * عشان نقدر نختبر الدخول فورًا من الإعدادات بدون ما نفتح التطبيق كامل.
+ */
+object Asia2TVAuth {
+    private const val PREFS = "asia2tv_prefs"
+    private const val MAIN_URL = "https://asia2tv.com"
+
+    private fun cookiesToString(cookies: Map<String, String>): String =
+        cookies.entries.joinToString(";") { "${it.key}=${it.value}" }
+
+    private fun cookiesFromString(raw: String?): Map<String, String> {
+        if (raw.isNullOrBlank()) return emptyMap()
+        return raw.split(";").mapNotNull {
+            val parts = it.split("=", limit = 2)
+            if (parts.size == 2) parts[0] to parts[1] else null
+        }.toMap()
+    }
+
+    fun loadSavedCookies(context: Context): Map<String, String> {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return cookiesFromString(prefs.getString("asia2tv_cookies", null))
+    }
+
+    private fun saveCookies(context: Context, cookies: Map<String, String>) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs.edit().putString("asia2tv_cookies", cookiesToString(cookies)).apply()
+    }
+
+    fun clearCookies(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs.edit().remove("asia2tv_cookies").apply()
+    }
+
+    /**
+     * يسجل الدخول فعليًا ويحفظ الجلسة، ويرجع نتيجة واضحة (نجح/فشل + سبب)
+     */
+    suspend fun login(context: Context): Asia2TVLoginResult {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val username = prefs.getString("asia2tv_email", null)
+        val password = prefs.getString("asia2tv_password", null)
+
+        if (username.isNullOrBlank() || password.isNullOrBlank()) {
+            return Asia2TVLoginResult(false, emptyMap(), "لم يتم إدخال بيانات الدخول")
+        }
+
+        try {
+            // 1) نجيب صفحة تسجيل الدخول أول مرة عشان نمسك الكوكيز الأولية (XSRF-TOKEN) و _token
+            val loginPage = app.get("$MAIN_URL/login")
+            val form = loginPage.document.selectFirst("form")
+                ?: return Asia2TVLoginResult(false, emptyMap(), "ما قدرنا نلاقي فورم تسجيل الدخول")
+
+            val initialCookies = loginPage.cookies
+
+            val formData = HashMap<String, String>()
+            form.select("input[type=hidden]").forEach { input ->
+                val name = input.attr("name")
+                if (name.isNotBlank()) formData[name] = input.attr("value")
+            }
+
+            // الحقول معروفة من فحص الموقع: email (فيها اسم المستخدم فعليًا) و password
+            formData["email"] = username
+            formData["password"] = password
+
+            // 2) موقع Laravel يحتاج X-XSRF-TOKEN بالهيدر، مأخوذ من كوكي XSRF-TOKEN (مفكوك الترميز)
+            val xsrfCookie = initialCookies["XSRF-TOKEN"]
+            val headers = if (xsrfCookie != null) {
+                mapOf("X-XSRF-TOKEN" to URLDecoder.decode(xsrfCookie, "UTF-8"))
+            } else emptyMap()
+
+            // 3) نرسل تسجيل الدخول
+            val loginResponse = app.post(
+                "$MAIN_URL/login",
+                data = formData,
+                cookies = initialCookies,
+                headers = headers,
+                referer = "$MAIN_URL/login",
+                allowRedirects = true
+            )
+
+            val finalCookies = initialCookies + loginResponse.cookies
+            if (finalCookies.isEmpty()) {
+                return Asia2TVLoginResult(false, emptyMap(), "لم يتم استلام أي كوكيز من السيرفر")
+            }
+
+            // 4) نتحقق فعليًا: نفتح الصفحة الرئيسية بنفس الكوكيز ونشوف فيه أثر لتسجيل الدخول
+            val checkDoc = app.get(MAIN_URL, cookies = finalCookies).document
+            val pageText = checkDoc.text()
+
+            val loggedIn = checkDoc.select("a[href*=logout], a[href*='تسجيل-خروج']").isNotEmpty() ||
+                pageText.contains("تسجيل خروج") ||
+                pageText.contains("تسجيل الخروج")
+
+            val stillOnLoginForm = checkDoc.select("form input[type=password]").isNotEmpty()
+
+            return if (loggedIn && !stillOnLoginForm) {
+                saveCookies(context, finalCookies)
+                Asia2TVLoginResult(true, finalCookies, "تم تسجيل الدخول بنجاح")
+            } else {
+                Asia2TVLoginResult(
+                    false,
+                    finalCookies,
+                    "تم إرسال الطلب لكن يبدو إن الدخول فشل (تحقق من اسم المستخدم/كلمة المرور)"
+                )
+            }
+        } catch (e: Exception) {
+            return Asia2TVLoginResult(false, emptyMap(), "خطأ: ${e.message}")
+        }
+    }
+}
 
 class Asia2TV(private val context: Context? = null) : MainAPI() {
     override var mainUrl = "https://asia2tv.com"
@@ -16,73 +137,28 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
         TvType.TvSeries
     )
 
-    private val prefs by lazy {
-        context?.getSharedPreferences("asia2tv_prefs", Context.MODE_PRIVATE)
-    }
-
     private var sessionCookies: Map<String, String> = emptyMap()
     private var loginAttempted = false
 
-    /**
-     * يسجل الدخول تلقائيًا باستخدام البيانات المحفوظة بالإعدادات.
-     * يكتشف أسماء حقول الفورم (email/password/csrf) تلقائيًا بدل ما يفترضها ثابتة،
-     * عشان يشتغل حتى لو الموقع غيّر أسماء الحقول.
-     */
     private suspend fun ensureLoggedIn() {
-        if (sessionCookies.isNotEmpty() || loginAttempted) return
+        if (sessionCookies.isNotEmpty()) return
+
+        // أول شي نجرب الكوكيز المحفوظة من قبل (بدون ما نعيد تسجيل الدخول كل مرة)
+        context?.let {
+            val saved = Asia2TVAuth.loadSavedCookies(it)
+            if (saved.isNotEmpty()) {
+                sessionCookies = saved
+                return
+            }
+        }
+
+        if (loginAttempted) return
         loginAttempted = true
 
-        val email = prefs?.getString("asia2tv_email", null)
-        val password = prefs?.getString("asia2tv_password", null)
-        if (email.isNullOrBlank() || password.isNullOrBlank()) return
-
-        try {
-            val loginPageResponse = app.get("$mainUrl/login")
-            val form = loginPageResponse.document.selectFirst("form") ?: return
-
-            val actionAttr = form.attr("action")
-            val actionUrl = when {
-                actionAttr.isBlank() -> "$mainUrl/login"
-                actionAttr.startsWith("http") -> actionAttr
-                else -> fixUrlNull(actionAttr) ?: "$mainUrl/login"
-            }
-
-            val formData = HashMap<String, String>()
-
-            // نمسك أي حقول مخفية (زي CSRF token) ونحافظ على قيمتها الأصلية
-            form.select("input[type=hidden]").forEach { input ->
-                val name = input.attr("name")
-                if (name.isNotBlank()) formData[name] = input.attr("value")
-            }
-
-            // نكتشف اسم حقل الإيميل/اليوزر تلقائيًا
-            val emailFieldName = form.select("input[type=email], input[type=text]")
-                .firstOrNull()?.attr("name")
-            // نكتشف اسم حقل الباسوورد تلقائيًا
-            val passwordFieldName = form.select("input[type=password]")
-                .firstOrNull()?.attr("name")
-
-            if (emailFieldName.isNullOrBlank() || passwordFieldName.isNullOrBlank()) {
-                return // ما قدرنا نلاقي الحقول، لا نكمل تسجيل الدخول
-            }
-
-            formData[emailFieldName] = email
-            formData[passwordFieldName] = password
-
-            val loginResponse = app.post(
-                actionUrl,
-                data = formData,
-                cookies = loginPageResponse.cookies,
-                referer = "$mainUrl/login",
-                allowRedirects = true
-            )
-
-            val cookies = loginPageResponse.cookies + loginResponse.cookies
-            if (cookies.isNotEmpty()) {
-                sessionCookies = cookies
-            }
-        } catch (e: Exception) {
-            // نتجاهل الخطأ ونكمل بدون تسجيل دخول بدل ما نوقف التطبيق
+        val ctx = context ?: return
+        val result = Asia2TVAuth.login(ctx)
+        if (result.success) {
+            sessionCookies = result.cookies
         }
     }
 
