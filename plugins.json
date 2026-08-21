@@ -1,0 +1,51 @@
+[
+    {
+        "fileHash": "sha256-d6aee4ebb55a5e99145015162999edc7304ed710581938247d7cd4bce9f0586b",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/drivesalem307/RunnerCloudStreamNew",
+        "fileSize": 12197,
+        "status": 3,
+        "authors": [
+            
+        ],
+        "version": -1,
+        "internalName": "ArabRunners",
+        "url": "https://raw.githubusercontent.com/drivesalem307/RunnerCloudStreamNew/builds/ArabRunners.cs3",
+        "name": "ArabRunners"
+    },
+    {
+        "fileHash": "sha256-a1da0912e9019fa06fa95d306ac7f572b3b939068d8ac6755a0041e2fc71e4c0",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/drivesalem307/RunnerCloudStreamNew",
+        "fileSize": 25861,
+        "status": 3,
+        "authors": [
+            
+        ],
+        "version": -1,
+        "internalName": "Asia2TV",
+        "url": "https://raw.githubusercontent.com/drivesalem307/RunnerCloudStreamNew/builds/Asia2TV.cs3",
+        "name": "Asia2TV"
+    },
+    {
+        "iconUrl": "https://upload.wikimedia.org/wikipedia/commons/2/2f/Korduene_Logo.png",
+        "fileHash": "sha256-e0a4eef09d566c7633ba60a3e4de2fb5cba072dcdc27bb67897f030cc9831977",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/drivesalem307/RunnerCloudStreamNew",
+        "fileSize": 7313,
+        "status": 1,
+        "language": "en",
+        "authors": [
+            "Cloudburst",
+            "Luna712"
+        ],
+        "tvTypes": [
+            "Movie"
+        ],
+        "version": 1,
+        "internalName": "ExampleProvider",
+        "description": "Lorem ipsum",
+        "url": "https://raw.githubusercontent.com/drivesalem307/RunnerCloudStreamNew/builds/ExampleProvider.cs3",
+        "name": "ExampleProvider"
+    }
+]
