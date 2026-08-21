@@ -79,15 +79,22 @@ object Asia2TVAuth {
             formData["email"] = username
             formData["password"] = password
 
+            val hiddenFieldNames = formData.keys.joinToString(", ")
+            val tokenValue = formData["_token"]
+
             // 2) موقع Laravel يحتاج X-XSRF-TOKEN بالهيدر، مأخوذ من كوكي XSRF-TOKEN (مفكوك الترميز)
             val xsrfCookie = initialCookies["XSRF-TOKEN"]
             val headers = HashMap<String, String>()
             if (xsrfCookie != null) {
                 headers["X-XSRF-TOKEN"] = URLDecoder.decode(xsrfCookie, "UTF-8")
             }
-            // نقلد طلب المتصفح الفعلي (AJAX/XHR) اللي يظهر بأدوات المطور
             headers["X-Requested-With"] = "XMLHttpRequest"
             headers["Accept"] = "application/json, text/plain, */*"
+
+            val diagInfo = "حقول الفورم: $hiddenFieldNames | " +
+                "طول _token: ${tokenValue?.length ?: 0} | " +
+                "كوكيز أولية: ${initialCookies.keys.joinToString(", ")} | " +
+                "XSRF موجود: ${xsrfCookie != null}"
 
             // 3) نرسل تسجيل الدخول
             val loginResponse = app.post(
@@ -101,13 +108,13 @@ object Asia2TVAuth {
 
             val finalCookies = initialCookies + loginResponse.cookies
             if (finalCookies.isEmpty()) {
-                return Asia2TVLoginResult(false, emptyMap(), "لم يتم استلام أي كوكيز من السيرفر")
+                return Asia2TVLoginResult(false, emptyMap(), "لم يتم استلام أي كوكيز من السيرفر\n\n$diagInfo")
             }
 
             // معلومات تشخيصية: كود الحالة وأول جزء من رد السيرفر على طلب الدخول نفسه
             val postStatus = loginResponse.code
             val postBodySnippet = try {
-                loginResponse.text.take(200)
+                loginResponse.text.take(600)
             } catch (e: Exception) {
                 "تعذر قراءة الرد"
             }
@@ -129,7 +136,7 @@ object Asia2TVAuth {
                 Asia2TVLoginResult(
                     false,
                     finalCookies,
-                    "فشل الدخول | كود الرد: $postStatus | مقتطف: $postBodySnippet"
+                    "فشل الدخول\nكود الرد: $postStatus\n\n$diagInfo\n\nمقتطف الرد:\n$postBodySnippet"
                 )
             }
         } catch (e: Exception) {
@@ -316,4 +323,3 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
         return true
     }
 }
- 
