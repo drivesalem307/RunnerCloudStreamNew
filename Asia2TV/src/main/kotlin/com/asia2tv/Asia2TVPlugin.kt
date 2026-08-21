@@ -4,7 +4,7 @@ import android.content.Context
 import android.text.InputType
 import android.widget.EditText
 import android.widget.LinearLayout
-import androidx.appcompat.app.AlertDialog
+import android.app.AlertDialog
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 
