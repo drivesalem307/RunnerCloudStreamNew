@@ -2,16 +2,18 @@ package com.asia2tv
 
 import android.app.AlertDialog
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.text.InputType
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Toast
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.startCoroutine
+import kotlin.concurrent.thread
 
 @CloudstreamPlugin
 class Asia2TVPlugin : Plugin() {
@@ -52,16 +54,24 @@ class Asia2TVPlugin : Plugin() {
 
                     Toast.makeText(ctx, "جاري تسجيل الدخول...", Toast.LENGTH_SHORT).show()
 
-                    CoroutineScope(Dispatchers.IO).launch {
-                        val result = Asia2TVAuth.login(ctx)
-                        withContext(Dispatchers.Main) {
-                            val icon = if (result.success) "✅" else "❌"
-                            Toast.makeText(
-                                ctx,
-                                "$icon ${result.message}",
-                                Toast.LENGTH_LONG
-                            ).show()
+                    // نشغّل دالة تسجيل الدخول (suspend) بخيط منفصل، بدون الحاجة لمكتبة kotlinx.coroutines
+                    val continuation = object : Continuation<Asia2TVLoginResult> {
+                        override val context = EmptyCoroutineContext
+                        override fun resumeWith(result: Result<Asia2TVLoginResult>) {
+                            val loginResult = result.getOrNull()
+                            val message = loginResult?.message
+                                ?: "خطأ غير متوقع: ${result.exceptionOrNull()?.message}"
+                            val icon = if (loginResult?.success == true) "✅" else "❌"
+
+                            Handler(Looper.getMainLooper()).post {
+                                Toast.makeText(ctx, "$icon $message", Toast.LENGTH_LONG).show()
+                            }
                         }
+                    }
+
+                    thread {
+                        val block: suspend () -> Asia2TVLoginResult = { Asia2TVAuth.login(ctx) }
+                        block.startCoroutine(continuation)
                     }
                 }
                 .setNegativeButton("إلغاء", null)
