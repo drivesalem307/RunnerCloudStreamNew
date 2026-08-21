@@ -3,7 +3,6 @@ package com.asia2tv
 import android.content.Context
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import org.jsoup.nodes.Element
 import java.net.URLDecoder
 
 /**
@@ -191,56 +190,37 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
         }
     }
 
+    // هذا الـ provider مخصص لمسلسل واحد بس (Running Man) بناءً على طلب المستخدم،
+    // فما نحتاج نتعامل مع الصفحة الرئيسية أو نظام البحث العام للموقع أبدًا.
+    private val fixedShowUrl = "https://asia2tv.com/serie/2016-running-man"
+    private val fixedShowTitle = "Running Man"
+
     override suspend fun getMainPage(
         page: Int,
         request: MainPageRequest
     ): HomePageResponse {
-        ensureLoggedIn()
-        val doc = app.get(mainUrl, cookies = sessionCookies).document
-        val items = doc.select("article, div.post-item, .post-main")
-            .mapNotNull { it.toSearchResult() }
-
-        return if (items.isNotEmpty()) {
-            newHomePageResponse(
-                HomePageList("Asia2TV", items)
-            )
-        } else {
-            newHomePageResponse(emptyList())
-        }
-    }
-
-    private fun Element.toSearchResult(): SearchResponse? {
-        val link = select("a").firstOrNull() ?: return null
-        val href = fixUrlNull(link.attr("href")) ?: return null
-
-        val title = select(".title, h2, h3")
-            .text()
-            .trim()
-            .ifEmpty { link.text().trim() }
-
-        if (title.isBlank()) return null
-
-        val poster = fixUrlNull(
-            select("img").attr("src")
+        val item = newTvSeriesSearchResponse(
+            fixedShowTitle,
+            fixedShowUrl,
+            TvType.AsianDrama
         )
 
-        return newTvSeriesSearchResponse(
-            title,
-            href,
-            TvType.AsianDrama
-        ) {
-            posterUrl = poster
-        }
+        return newHomePageResponse(
+            HomePageList("Asia2TV", listOf(item))
+        )
     }
 
     override suspend fun search(
         query: String
     ): List<SearchResponse> {
-        ensureLoggedIn()
-        val doc = app.get("$mainUrl/?s=$query", cookies = sessionCookies).document
-
-        return doc.select("article, div.post-item, .post-main")
-            .mapNotNull { it.toSearchResult() }
+        // نرجع نفس المسلسل الثابت دايمًا بغض النظر عن كلمة البحث،
+        // بما إن هذا الـ provider مخصص لمسلسل واحد فقط
+        val item = newTvSeriesSearchResponse(
+            fixedShowTitle,
+            fixedShowUrl,
+            TvType.AsianDrama
+        )
+        return listOf(item)
     }
 
     override suspend fun load(
