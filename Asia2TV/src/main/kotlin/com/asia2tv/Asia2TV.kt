@@ -187,6 +187,7 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
     // هذا الـ provider مخصص لمسلسل واحد بس (Running Man) بناءً على طلب المستخدم
     private val fixedShowUrl = "https://asia2tv.com/serie/2016-running-man"
     private val fixedShowTitle = "Running Man"
+    private val fixedShowPoster = "https://images.squarespace-cdn.com/content/v1/5e071de60f68875f9af836c0/1652287937008-6N7KFSMJ0F86QCTEVVWM/Running+Man.jpg"
 
     override suspend fun getMainPage(
         page: Int,
@@ -196,7 +197,9 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
             fixedShowTitle,
             fixedShowUrl,
             TvType.AsianDrama
-        )
+        ) {
+            posterUrl = fixedShowPoster
+        }
 
         return newHomePageResponse(
             HomePageList("Asia2TV", listOf(item))
@@ -210,7 +213,9 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
             fixedShowTitle,
             fixedShowUrl,
             TvType.AsianDrama
-        )
+        ) {
+            posterUrl = fixedShowPoster
+        }
         return listOf(item)
     }
 
@@ -225,11 +230,13 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
         ).firstOrNull()?.text()?.trim()
             ?: "Asia2TV"
 
+        val fallbackPoster = "https://www.hellokpop.com/wp-content/uploads/2019/07/WE79921562_ori.jpg"
+
         val poster = fixUrlNull(
             doc.select(
                 ".poster img, .entry-content img, article img"
             ).firstOrNull()?.attr("src")
-        )
+        ) ?: fallbackPoster
 
         val description = doc.select(
             ".entry-content, .story, .post-content"
