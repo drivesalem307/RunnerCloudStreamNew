@@ -5,8 +5,11 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
+import android.util.TypedValue
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
 import android.widget.Toast
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
@@ -64,7 +67,19 @@ class Asia2TVPlugin : Plugin() {
                             val icon = if (loginResult?.success == true) "✅" else "❌"
 
                             Handler(Looper.getMainLooper()).post {
-                                Toast.makeText(ctx, "$icon $message", Toast.LENGTH_LONG).show()
+                                val textView = TextView(ctx).apply {
+                                    text = message
+                                    setPadding(50, 30, 50, 30)
+                                    setTextIsSelectable(true)
+                                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                                }
+                                val scroll = ScrollView(ctx).apply { addView(textView) }
+
+                                AlertDialog.Builder(ctx)
+                                    .setTitle("$icon نتيجة تسجيل الدخول")
+                                    .setView(scroll)
+                                    .setPositiveButton("حسنًا", null)
+                                    .show()
                             }
                         }
                     }
@@ -79,3 +94,4 @@ class Asia2TVPlugin : Plugin() {
         }
     }
 }
+ 
