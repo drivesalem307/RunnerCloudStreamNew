@@ -286,17 +286,28 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         ensureLoggedIn()
-        val doc = app.get(data, cookies = sessionCookies).document
+
+        val diagLines = ArrayList<String>()
+        diagLines.add("كوكيز الجلسة الحالية: ${if (sessionCookies.isEmpty()) "فاضية (غير مسجل دخول!)" else sessionCookies.keys.joinToString(", ")}")
+
+        val episodeResponse = app.get(data, cookies = sessionCookies)
+        val doc = episodeResponse.document
+
+        diagLines.add("كود صفحة الحلقة: ${episodeResponse.code}")
+        diagLines.add("رابط الحلقة النهائي: ${episodeResponse.url}")
 
         // الاكتشاف المهم: طلب ajaxGetRequest يحتاج هيدر X-CSRF-TOKEN
         // (مختلف عن X-XSRF-TOKEN المستخدم بتسجيل الدخول) — قيمته تُقرأ
         // من <meta name="csrf-token"> الموجودة بنفس صفحة الحلقة نفسها
         val csrfToken = doc.selectFirst("meta[name=csrf-token]")?.attr("content")
+        diagLines.add("CSRF token موجود؟: ${!csrfToken.isNullOrBlank()} (طول: ${csrfToken?.length ?: 0})")
 
         // نلقط بس أزرار "السيرفرات المجانية" (نتجاهل VIP كليًا)
         val freeServerLinks = doc.select("div:has(button:contains(المجانية)) a[data-code]")
+        diagLines.add("عدد السيرفرات المجانية اللي لقيناها بالصفحة: ${freeServerLinks.size}")
 
         if (freeServerLinks.isEmpty()) {
+            showDiagnosticDialog("لا يوجد سيرفرات", diagLines)
             return false
         }
 
@@ -312,8 +323,12 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
         // نجرب كل السيرفرات المجانية (مو بس أول وحدة تنجح)، عشان يطلع
         // للمستخدم أكثر من خيار "Source" بقائمة Cloudstream
         for (serverLink in freeServerLinks) {
+            val serverName = serverLink.selectFirst("span")?.text()?.trim() ?: "؟"
             val code = serverLink.attr("data-code")
-            if (code.isBlank()) continue
+            if (code.isBlank()) {
+                diagLines.add("[$serverName] data-code فاضي، تجاهلناه")
+                continue
+            }
 
             try {
                 val ajaxResponse = app.post(
@@ -327,31 +342,78 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
                     headers = ajaxHeaders
                 )
 
+                val bodySnippet = ajaxResponse.text.take(150)
+                diagLines.add("[$serverName] كود الرد: ${ajaxResponse.code} | المقتطف: $bodySnippet")
+
                 val json = JSONObject(ajaxResponse.text)
-                if (!json.optBoolean("status", false)) continue
+                if (!json.optBoolean("status", false)) {
+                    diagLines.add("[$serverName] status=false بالرد، تجاهلناه")
+                    continue
+                }
 
                 val codeplayHtml = json.optString("codeplay")
-                if (codeplayHtml.isBlank()) continue
+                if (codeplayHtml.isBlank()) {
+                    diagLines.add("[$serverName] codeplay فاضي")
+                    continue
+                }
 
                 val src = fixUrlNull(
                     org.jsoup.Jsoup.parse(codeplayHtml).selectFirst("iframe")?.attr("src")
-                ) ?: continue
+                )
+                if (src == null) {
+                    diagLines.add("[$serverName] ما لقينا iframe جوا الرد")
+                    continue
+                }
 
                 if (src.contains("doubleclick") ||
                     src.contains("googleads") ||
                     src.contains("googlesyndication")
                 ) {
+                    diagLines.add("[$serverName] إعلان، تجاهلناه")
                     continue
                 }
 
+                diagLines.add("[$serverName] ✅ رابط سليم: $src")
                 foundAny = true
                 loadExtractor(src, data, subtitleCallback, callback)
                 // ملاحظة: ما نوقف هنا (لا break) — نكمل باقي السيرفرات المجانية
             } catch (e: Exception) {
+                diagLines.add("[$serverName] استثناء: ${e.message}")
                 continue
             }
         }
 
+        if (!foundAny) {
+            showDiagnosticDialog("فشل تحميل كل السيرفرات", diagLines)
+        }
+
         return foundAny
+    }
+
+    /**
+     * يعرض نافذة تشخيصية فورية جوا التطبيق تفصّل وش صار مع كل سيرفر —
+     * بدل ما نضطر نخمن، نشوف بالضبط أين تعطل الطلب الحقيقي اللي التطبيق يرسله.
+     */
+    private fun showDiagnosticDialog(title: String, lines: List<String>) {
+        val ctx = context ?: return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            try {
+                val textView = android.widget.TextView(ctx).apply {
+                    text = lines.joinToString("\n\n")
+                    setPadding(50, 30, 50, 30)
+                    setTextIsSelectable(true)
+                    setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+                }
+                val scroll = android.widget.ScrollView(ctx).apply { addView(textView) }
+
+                android.app.AlertDialog.Builder(ctx)
+                    .setTitle("🔍 $title")
+                    .setView(scroll)
+                    .setPositiveButton("حسنًا", null)
+                    .show()
+            } catch (e: Exception) {
+                // نتجاهل أي خطأ بعرض النافذة نفسها عشان ما يوقف تشغيل الفيديو
+            }
+        }
     }
 }
