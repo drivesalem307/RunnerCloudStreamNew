@@ -266,25 +266,32 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
 
         val episodes = ArrayList<Episode>()
 
-        val episodeLinks = doc.select(
-            "a[href*='/episode/'], " +
-            "a[href*='episode'], " +
-            ".episodes-list a"
-        )
+        // كل حلقة موجودة داخل وسم <a id="pageepisodeN" href="..."> يحتوي
+        // span.titlepisode فيه رقم/اسم الحلقة. هذا هو الـ selector الحقيقي
+        // المكتشف من فحص صفحة المسلسل (serie/...) مباشرة.
+        val episodeLinks = doc.select("a[id^=pageepisode]")
 
         if (episodeLinks.isNotEmpty()) {
-            episodeLinks.forEachIndexed { index, element ->
-                val epUrl = fixUrlNull(
-                    element.attr("href")
-                ) ?: return@forEachIndexed
+            // القائمة بالموقع تجي من الأحدث للأقدم (816، 815، 814...)
+            // نعكس الترتيب عشان تطلع بالتطبيق من الأقدم للأحدث (1، 2، 3...)
+            val ordered = episodeLinks.reversed()
+
+            ordered.forEachIndexed { index, element ->
+                val epUrl = fixUrlNull(element.attr("href")) ?: return@forEachIndexed
+
+                val rawTitle = element.selectFirst(".titlepisode")
+                    ?.text()
+                    ?.trim()
+                    .orEmpty()
+
+                // نحاول نستخرج رقم الحلقة الفعلي من النص (مثل "الحلقة 815"
+                // أو "ح816: تغلب على الحر") عشان الترقيم يطابق الموقع تمامًا
+                val extractedNumber = Regex("""\d+""").find(rawTitle)?.value?.toIntOrNull()
 
                 episodes.add(
                     newEpisode(epUrl) {
-                        name = element.text()
-                            .trim()
-                            .ifEmpty { "الحلقة ${index + 1}" }
-
-                        episode = index + 1
+                        name = rawTitle.ifEmpty { "الحلقة ${index + 1}" }
+                        episode = extractedNumber ?: (index + 1)
                     }
                 )
             }
@@ -317,20 +324,37 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
         ensureLoggedIn()
         val doc = app.get(data, cookies = sessionCookies).document
 
-        doc.select("iframe, source, option[value*='http']").forEach { element ->
-            val src = fixUrlNull(
-                element.attr("src").ifEmpty { element.attr("value") }
-            ) ?: return@forEach
+        // اكتشفنا إن الفيديو يجي عن طريق iframe حقيقي بالـ HTML
+        // (مثال: <iframe id="iframe_player" src="https://vidmoly.net/embed-....html">)
+        // نتجاهل iframes الإعلانات (زي googleads/doubleclick) ونمرر الباقي فقط لـ loadExtractor
+        var foundAny = false
 
-            loadExtractor(
-                src,
-                data,
-                subtitleCallback,
-                callback
-            )
+        doc.select("iframe").forEach { element ->
+            val src = fixUrlNull(element.attr("src")) ?: return@forEach
+
+            if (src.contains("doubleclick") ||
+                src.contains("googleads") ||
+                src.contains("googlesyndication")
+            ) {
+                return@forEach
+            }
+
+            foundAny = true
+            loadExtractor(src, data, subtitleCallback, callback)
         }
 
-        return true
+        // احتياط: بعض الصفحات ممكن تحط الرابط بـ source/option بدل iframe
+        if (!foundAny) {
+            doc.select("source, option[value*='http']").forEach { element ->
+                val src = fixUrlNull(
+                    element.attr("src").ifEmpty { element.attr("value") }
+                ) ?: return@forEach
+
+                foundAny = true
+                loadExtractor(src, data, subtitleCallback, callback)
+            }
+        }
+
+        return foundAny
     }
 }
- 
