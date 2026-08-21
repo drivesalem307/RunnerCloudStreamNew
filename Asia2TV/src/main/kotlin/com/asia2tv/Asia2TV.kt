@@ -95,14 +95,17 @@ object Asia2TVAuth {
                 "كوكيز أولية: ${initialCookies.keys.joinToString(", ")} | " +
                 "XSRF موجود: ${xsrfCookie != null}"
 
-            // 3) نرسل تسجيل الدخول
+            // 3) نرسل تسجيل الدخول — مهم: نوقف التحويل التلقائي (allowRedirects = false)
+            // عشان نمسك الكوكيز الحقيقية من رد تسجيل الدخول نفسه (الـ 302) مباشرة،
+            // بدل ما نخلي المكتبة تتبع التحويل تلقائيًا وترجع كوكيز صفحة تانية (احتمال يكون
+            // السبب الحقيقي وراء "تغيّر معرف الجلسة" بدون ما يكون فعلاً دخول ناجح)
             val loginResponse = app.post(
                 "$MAIN_URL/login",
                 data = formData,
                 cookies = initialCookies,
                 headers = headers,
                 referer = "$MAIN_URL/login",
-                allowRedirects = true
+                allowRedirects = false
             )
 
             val finalCookies = initialCookies + loginResponse.cookies
@@ -110,42 +113,36 @@ object Asia2TVAuth {
                 return Asia2TVLoginResult(false, emptyMap(), "لم يتم استلام أي كوكيز من السيرفر\n\n$diagInfo")
             }
 
-            // معلومات تشخيصية دقيقة: وين هبطنا فعليًا بعد إرسال تسجيل الدخول
             val postStatus = loginResponse.code
-            val postDoc = try { loginResponse.document } catch (e: Exception) { null }
-            val postTitle = postDoc?.title() ?: "غير معروف"
-            val postHasPasswordField = postDoc?.select("input[type=password]")?.isNotEmpty() ?: false
-            val postFinalUrl = try { loginResponse.url } catch (e: Exception) { "غير معروف" }
+            val redirectLocation = loginResponse.headers["location"] ?: "لا يوجد"
 
             // الدليل الأقوى: Laravel يغيّر معرف الجلسة (session) تلقائيًا بعد نجاح تسجيل الدخول
-            // (session regenerate). لو القيمة تغيّرت، الدخول نجح فعليًا بغض النظر عن شكل الصفحة.
             val sessionBefore = initialCookies["asia2tvcom_session"]
             val sessionAfter = finalCookies["asia2tvcom_session"]
             val sessionChanged = sessionBefore != null && sessionAfter != null && sessionBefore != sessionAfter
 
-            // 4) نتحقق أيضًا من محتوى الصفحة الرئيسية كدليل إضافي (مو أساسي)
-            val checkDoc = app.get(MAIN_URL, cookies = finalCookies).document
-            val pageText = checkDoc.text()
-            val checkTitle = checkDoc.title()
+            // 4) التحقق الحاسم: نفتح صفحة مسلسل معروف بهالكوكيز، ونشوف هل نشوف محتوى
+            // العضو الحقيقي (روابط الحلقات) أو محتوى الزائر (بانر الصفحة الرئيسية)
+            val verifyDoc = app.get(
+                "$MAIN_URL/serie/2016-running-man",
+                cookies = finalCookies
+            ).document
+            val episodeLinksFound = verifyDoc.select("a[id^=pageepisode]").size
+            val actuallyLoggedIn = episodeLinksFound > 0
 
-            val hasLogoutHint = checkDoc.select("a[href*=logout], a[href*='تسجيل-خروج']").isNotEmpty() ||
-                pageText.contains("تسجيل خروج") ||
-                pageText.contains("تسجيل الخروج")
+            val diagInfo2 = "كود رد تسجيل الدخول: $postStatus\n" +
+                "رابط التحويل (Location): $redirectLocation\n" +
+                "تغيّر معرف الجلسة: $sessionChanged\n" +
+                "عدد روابط الحلقات بصفحة Running Man (التحقق الحاسم): $episodeLinksFound"
 
-            val diagInfo2 = "رابط نهائي بعد الدخول: $postFinalUrl\n" +
-                "عنوان صفحة رد الدخول: $postTitle\n" +
-                "فيها حقل باسورد؟: $postHasPasswordField\n" +
-                "تغيّر معرف الجلسة (الدليل الأهم): $sessionChanged\n" +
-                "لقينا رابط خروج بالواجهة؟: $hasLogoutHint"
-
-            return if (sessionChanged || hasLogoutHint) {
+            return if (actuallyLoggedIn) {
                 saveCookies(context, finalCookies)
-                Asia2TVLoginResult(true, finalCookies, "تم تسجيل الدخول بنجاح ✅\n\n$diagInfo2")
+                Asia2TVLoginResult(true, finalCookies, "تم تسجيل الدخول بنجاح فعليًا ✅\n\n$diagInfo2")
             } else {
                 Asia2TVLoginResult(
                     false,
                     finalCookies,
-                    "فشل الدخول\nكود الرد: $postStatus\n\n$diagInfo\n\n$diagInfo2"
+                    "الدخول لم ينجح فعليًا رغم تغيّر الجلسة ❌\n\n$diagInfo\n\n$diagInfo2"
                 )
             }
         } catch (e: Exception) {
