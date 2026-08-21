@@ -111,23 +111,30 @@ object Asia2TVAuth {
                 return Asia2TVLoginResult(false, emptyMap(), "لم يتم استلام أي كوكيز من السيرفر\n\n$diagInfo")
             }
 
-            // معلومات تشخيصية: كود الحالة وأول جزء من رد السيرفر على طلب الدخول نفسه
+            // معلومات تشخيصية دقيقة: وين هبطنا فعليًا بعد إرسال تسجيل الدخول
             val postStatus = loginResponse.code
-            val postBodySnippet = try {
-                loginResponse.text.take(600)
-            } catch (e: Exception) {
-                "تعذر قراءة الرد"
-            }
+            val postDoc = try { loginResponse.document } catch (e: Exception) { null }
+            val postTitle = postDoc?.title() ?: "غير معروف"
+            val postHasPasswordField = postDoc?.select("input[type=password]")?.isNotEmpty() ?: false
+            val postFinalUrl = try { loginResponse.url } catch (e: Exception) { "غير معروف" }
 
             // 4) نتحقق فعليًا: نفتح الصفحة الرئيسية بنفس الكوكيز ونشوف فيه أثر لتسجيل الدخول
             val checkDoc = app.get(MAIN_URL, cookies = finalCookies).document
             val pageText = checkDoc.text()
+            val checkTitle = checkDoc.title()
 
             val loggedIn = checkDoc.select("a[href*=logout], a[href*='تسجيل-خروج']").isNotEmpty() ||
                 pageText.contains("تسجيل خروج") ||
                 pageText.contains("تسجيل الخروج")
 
             val stillOnLoginForm = checkDoc.select("form input[type=password]").isNotEmpty()
+
+            val diagInfo2 = "رابط نهائي بعد الدخول: $postFinalUrl\n" +
+                "عنوان صفحة رد الدخول: $postTitle\n" +
+                "فيها حقل باسورد؟: $postHasPasswordField\n" +
+                "عنوان الصفحة الرئيسية بعدها: $checkTitle\n" +
+                "لقينا رابط خروج؟: $loggedIn\n" +
+                "لسا فيه فورم دخول بالرئيسية؟: $stillOnLoginForm"
 
             return if (loggedIn && !stillOnLoginForm) {
                 saveCookies(context, finalCookies)
@@ -136,7 +143,7 @@ object Asia2TVAuth {
                 Asia2TVLoginResult(
                     false,
                     finalCookies,
-                    "فشل الدخول\nكود الرد: $postStatus\n\n$diagInfo\n\nمقتطف الرد:\n$postBodySnippet"
+                    "فشل الدخول\nكود الرد: $postStatus\n\n$diagInfo\n\n$diagInfo2"
                 )
             }
         } catch (e: Exception) {
