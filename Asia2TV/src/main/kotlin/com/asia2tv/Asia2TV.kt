@@ -82,7 +82,8 @@ object Asia2TVAuth {
             val hiddenFieldNames = formData.keys.joinToString(", ")
             val tokenValue = formData["_token"]
 
-            // 2) موقع Laravel يحتاج X-XSRF-TOKEN بالهيدر، مأخوذ من كوكي XSRF-TOKEN (مفكوك الترميز)
+            // موقع Laravel يحتاج X-XSRF-TOKEN بالهيدر (خاص بتسجيل الدخول تحديدًا)،
+            // مأخوذ من كوكي XSRF-TOKEN (مفكوك الترميز)
             val xsrfCookie = initialCookies["XSRF-TOKEN"]
             val headers = HashMap<String, String>()
             if (xsrfCookie != null) {
@@ -96,10 +97,7 @@ object Asia2TVAuth {
                 "كوكيز أولية: ${initialCookies.keys.joinToString(", ")} | " +
                 "XSRF موجود: ${xsrfCookie != null}"
 
-            // 3) نرسل تسجيل الدخول — مهم: نوقف التحويل التلقائي (allowRedirects = false)
-            // عشان نمسك الكوكيز الحقيقية من رد تسجيل الدخول نفسه (الـ 302) مباشرة،
-            // بدل ما نخلي المكتبة تتبع التحويل تلقائيًا وترجع كوكيز صفحة تانية (احتمال يكون
-            // السبب الحقيقي وراء "تغيّر معرف الجلسة" بدون ما يكون فعلاً دخول ناجح)
+            // 2) نرسل تسجيل الدخول
             val loginResponse = app.post(
                 "$MAIN_URL/login",
                 data = formData,
@@ -117,12 +115,11 @@ object Asia2TVAuth {
             val postStatus = loginResponse.code
             val redirectLocation = loginResponse.headers["location"] ?: "لا يوجد"
 
-            // الدليل الأقوى: Laravel يغيّر معرف الجلسة (session) تلقائيًا بعد نجاح تسجيل الدخول
             val sessionBefore = initialCookies["asia2tvcom_session"]
             val sessionAfter = finalCookies["asia2tvcom_session"]
             val sessionChanged = sessionBefore != null && sessionAfter != null && sessionBefore != sessionAfter
 
-            // 4) التحقق الحاسم: نفتح صفحة مسلسل معروف بهالكوكيز، ونشوف هل نشوف محتوى
+            // 3) التحقق الحاسم: نفتح صفحة مسلسل معروف بهالكوكيز، ونشوف هل نشوف محتوى
             // العضو الحقيقي (روابط الحلقات) أو محتوى الزائر (بانر الصفحة الرئيسية)
             val verifyDoc = app.get(
                 "$MAIN_URL/serie/2016-running-man",
@@ -169,7 +166,6 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
     private suspend fun ensureLoggedIn() {
         if (sessionCookies.isNotEmpty()) return
 
-        // أول شي نجرب الكوكيز المحفوظة من قبل (بدون ما نعيد تسجيل الدخول كل مرة)
         context?.let {
             val saved = Asia2TVAuth.loadSavedCookies(it)
             if (saved.isNotEmpty()) {
@@ -188,8 +184,7 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
         }
     }
 
-    // هذا الـ provider مخصص لمسلسل واحد بس (Running Man) بناءً على طلب المستخدم،
-    // فما نحتاج نتعامل مع الصفحة الرئيسية أو نظام البحث العام للموقع أبدًا.
+    // هذا الـ provider مخصص لمسلسل واحد بس (Running Man) بناءً على طلب المستخدم
     private val fixedShowUrl = "https://asia2tv.com/serie/2016-running-man"
     private val fixedShowTitle = "Running Man"
 
@@ -211,8 +206,6 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
     override suspend fun search(
         query: String
     ): List<SearchResponse> {
-        // نرجع نفس المسلسل الثابت دايمًا بغض النظر عن كلمة البحث،
-        // بما إن هذا الـ provider مخصص لمسلسل واحد فقط
         val item = newTvSeriesSearchResponse(
             fixedShowTitle,
             fixedShowUrl,
@@ -244,14 +237,9 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
 
         val episodes = ArrayList<Episode>()
 
-        // كل حلقة موجودة داخل وسم <a id="pageepisodeN" href="..."> يحتوي
-        // span.titlepisode فيه رقم/اسم الحلقة. هذا هو الـ selector الحقيقي
-        // المكتشف من فحص صفحة المسلسل (serie/...) مباشرة.
         val episodeLinks = doc.select("a[id^=pageepisode]")
 
         if (episodeLinks.isNotEmpty()) {
-            // القائمة بالموقع تجي من الأحدث للأقدم (816، 815، 814...)
-            // نعكس الترتيب عشان تطلع بالتطبيق من الأقدم للأحدث (1، 2، 3...)
             val ordered = episodeLinks.reversed()
 
             ordered.forEachIndexed { index, element ->
@@ -262,8 +250,6 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
                     ?.trim()
                     .orEmpty()
 
-                // نحاول نستخرج رقم الحلقة الفعلي من النص (مثل "الحلقة 815"
-                // أو "ح816: تغلب على الحر") عشان الترقيم يطابق الموقع تمامًا
                 val extractedNumber = Regex("""\d+""").find(rawTitle)?.value?.toIntOrNull()
 
                 episodes.add(
@@ -302,12 +288,12 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
         ensureLoggedIn()
         val doc = app.get(data, cookies = sessionCookies).document
 
-        // رابط الفيديو ما يجي جاهز بالـ HTML — الموقع يحط أزرار "سيرفرات" (مجاني/VIP)
-        // كل وحد فيها data-code، ولما تنضغط بالمتصفح تسوي جافاسكربت طلب AJAX يجيب
-        // الفيديو الفعلي. نحاكي نفس الطلب مباشرة بدون تشغيل جافاسكربت.
-        //
-        // نختار بس من مجموعة "السيرفرات المجانية" (نتجاهل VIP كليًا) —
-        // نلقاها بالبحث عن الزر اللي فيه كلمة "المجانية" ونجيب أول data-code جواه
+        // الاكتشاف المهم: طلب ajaxGetRequest يحتاج هيدر X-CSRF-TOKEN
+        // (مختلف عن X-XSRF-TOKEN المستخدم بتسجيل الدخول) — قيمته تُقرأ
+        // من <meta name="csrf-token"> الموجودة بنفس صفحة الحلقة نفسها
+        val csrfToken = doc.selectFirst("meta[name=csrf-token]")?.attr("content")
+
+        // نلقط بس أزرار "السيرفرات المجانية" (نتجاهل VIP كليًا)
         val freeServerLinks = doc.select("div:has(button:contains(المجانية)) a[data-code]")
 
         if (freeServerLinks.isEmpty()) {
@@ -316,6 +302,15 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
 
         var foundAny = false
 
+        val ajaxHeaders = HashMap<String, String>()
+        ajaxHeaders["X-Requested-With"] = "XMLHttpRequest"
+        ajaxHeaders["Accept"] = "application/json, text/plain, */*"
+        if (!csrfToken.isNullOrBlank()) {
+            ajaxHeaders["X-CSRF-TOKEN"] = csrfToken
+        }
+
+        // نجرب كل السيرفرات المجانية (مو بس أول وحدة تنجح)، عشان يطلع
+        // للمستخدم أكثر من خيار "Source" بقائمة Cloudstream
         for (serverLink in freeServerLinks) {
             val code = serverLink.attr("data-code")
             if (code.isBlank()) continue
@@ -329,10 +324,7 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
                     ),
                     cookies = sessionCookies,
                     referer = data,
-                    headers = mapOf(
-                        "X-Requested-With" to "XMLHttpRequest",
-                        "Accept" to "application/json, text/plain, */*"
-                    )
+                    headers = ajaxHeaders
                 )
 
                 val json = JSONObject(ajaxResponse.text)
@@ -354,9 +346,7 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
 
                 foundAny = true
                 loadExtractor(src, data, subtitleCallback, callback)
-
-                // أول سيرفر مجاني يشتغل يكفينا — نوقف بدل ما نجرب الباقي كلهم
-                break
+                // ملاحظة: ما نوقف هنا (لا break) — نكمل باقي السيرفرات المجانية
             } catch (e: Exception) {
                 continue
             }
