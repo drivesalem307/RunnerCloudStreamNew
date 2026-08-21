@@ -50,6 +50,40 @@ object Asia2TVAuth {
     }
 
     /**
+     * نفس "التحقق الحاسم" المستخدم بعد تسجيل الدخول مباشرة: نفتح صفحة مسلسل معروف
+     * بهالكوكيز، ونشوف هل نشوف روابط حلقات حقيقية (عضو مسجل) أو لا (جلسة منتهية/زائر).
+     * يُستخدم للتأكد إن الكوكيز المحفوظة من قبل لسا صالحة قبل الاعتماد عليها.
+     */
+    private suspend fun isSessionValid(cookies: Map<String, String>): Boolean {
+        if (cookies.isEmpty()) return false
+        return try {
+            val verifyDoc = app.get(
+                "$MAIN_URL/serie/2016-running-man",
+                cookies = cookies
+            ).document
+            verifyDoc.select("a[id^=pageepisode]").size > 0
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * يتحقق من الكوكيز المحفوظة فعليًا (مو بس وجودها)، ولو طلعت منتهية يمسحها
+     * عشان ensureLoggedIn يسجل دخول جديد من الصفر بدل ما يوثق فيها أبديًا.
+     */
+    suspend fun loadValidSavedCookies(context: Context): Map<String, String> {
+        val saved = loadSavedCookies(context)
+        if (saved.isEmpty()) return emptyMap()
+
+        return if (isSessionValid(saved)) {
+            saved
+        } else {
+            clearCookies(context)
+            emptyMap()
+        }
+    }
+
+    /**
      * يسجل الدخول فعليًا ويحفظ الجلسة، ويرجع نتيجة واضحة (نجح/فشل + سبب)
      */
     suspend fun login(context: Context): Asia2TVLoginResult {
@@ -167,7 +201,9 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
         if (sessionCookies.isNotEmpty()) return
 
         context?.let {
-            val saved = Asia2TVAuth.loadSavedCookies(it)
+            // نتحقق فعليًا من صلاحية الكوكيز المحفوظة، مو بس وجودها.
+            // لو منتهية، هذي الدالة تمسحها تلقائيًا وترجع فاضية عشان نكمل لتسجيل دخول جديد.
+            val saved = Asia2TVAuth.loadValidSavedCookies(it)
             if (saved.isNotEmpty()) {
                 sessionCookies = saved
                 return
