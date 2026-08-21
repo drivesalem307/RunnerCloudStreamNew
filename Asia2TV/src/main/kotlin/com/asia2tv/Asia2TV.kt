@@ -3,6 +3,7 @@ package com.asia2tv
 import android.content.Context
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import org.json.JSONObject
 import java.net.URLDecoder
 
 /**
@@ -301,34 +302,63 @@ class Asia2TV(private val context: Context? = null) : MainAPI() {
         ensureLoggedIn()
         val doc = app.get(data, cookies = sessionCookies).document
 
-        // اكتشفنا إن الفيديو يجي عن طريق iframe حقيقي بالـ HTML
-        // (مثال: <iframe id="iframe_player" src="https://vidmoly.net/embed-....html">)
-        // نتجاهل iframes الإعلانات (زي googleads/doubleclick) ونمرر الباقي فقط لـ loadExtractor
-        var foundAny = false
+        // رابط الفيديو ما يجي جاهز بالـ HTML — الموقع يحط أزرار "سيرفرات" (مجاني/VIP)
+        // كل وحد فيها data-code، ولما تنضغط بالمتصفح تسوي جافاسكربت طلب AJAX يجيب
+        // الفيديو الفعلي. نحاكي نفس الطلب مباشرة بدون تشغيل جافاسكربت.
+        //
+        // نختار بس من مجموعة "السيرفرات المجانية" (نتجاهل VIP كليًا) —
+        // نلقاها بالبحث عن الزر اللي فيه كلمة "المجانية" ونجيب أول data-code جواه
+        val freeServerLinks = doc.select("div:has(button:contains(المجانية)) a[data-code]")
 
-        doc.select("iframe").forEach { element ->
-            val src = fixUrlNull(element.attr("src")) ?: return@forEach
-
-            if (src.contains("doubleclick") ||
-                src.contains("googleads") ||
-                src.contains("googlesyndication")
-            ) {
-                return@forEach
-            }
-
-            foundAny = true
-            loadExtractor(src, data, subtitleCallback, callback)
+        if (freeServerLinks.isEmpty()) {
+            return false
         }
 
-        // احتياط: بعض الصفحات ممكن تحط الرابط بـ source/option بدل iframe
-        if (!foundAny) {
-            doc.select("source, option[value*='http']").forEach { element ->
+        var foundAny = false
+
+        for (serverLink in freeServerLinks) {
+            val code = serverLink.attr("data-code")
+            if (code.isBlank()) continue
+
+            try {
+                val ajaxResponse = app.post(
+                    "$mainUrl/ajaxGetRequest",
+                    data = mapOf(
+                        "action" to "iframe_server",
+                        "code" to code
+                    ),
+                    cookies = sessionCookies,
+                    referer = data,
+                    headers = mapOf(
+                        "X-Requested-With" to "XMLHttpRequest",
+                        "Accept" to "application/json, text/plain, */*"
+                    )
+                )
+
+                val json = JSONObject(ajaxResponse.text)
+                if (!json.optBoolean("status", false)) continue
+
+                val codeplayHtml = json.optString("codeplay")
+                if (codeplayHtml.isBlank()) continue
+
                 val src = fixUrlNull(
-                    element.attr("src").ifEmpty { element.attr("value") }
-                ) ?: return@forEach
+                    org.jsoup.Jsoup.parse(codeplayHtml).selectFirst("iframe")?.attr("src")
+                ) ?: continue
+
+                if (src.contains("doubleclick") ||
+                    src.contains("googleads") ||
+                    src.contains("googlesyndication")
+                ) {
+                    continue
+                }
 
                 foundAny = true
                 loadExtractor(src, data, subtitleCallback, callback)
+
+                // أول سيرفر مجاني يشتغل يكفينا — نوقف بدل ما نجرب الباقي كلهم
+                break
+            } catch (e: Exception) {
+                continue
             }
         }
 
