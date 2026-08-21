@@ -1,12 +1,11 @@
 package com.asia2tv
 
+import android.content.Context
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
-import com.lagradost.cloudstream3.plugins.Plugin
+import org.jsoup.nodes.Element
 
-class Asia2TV : MainAPI() {
-
+class Asia2TV(private val context: Context? = null) : MainAPI() {
     override var mainUrl = "https://asia2tv.com"
     override var name = "Asia2TV"
     override var lang = "ar"
@@ -17,27 +16,73 @@ class Asia2TV : MainAPI() {
         TvType.TvSeries
     )
 
-    companion object {
-        var username = "jumanalla"
-        var password = "exo12345"
-        var loggedIn = false
+    private val prefs by lazy {
+        context?.getSharedPreferences("asia2tv_prefs", Context.MODE_PRIVATE)
     }
 
-    private fun org.jsoup.nodes.Element.toSearchResult(): SearchResponse? {
-        val a = select("a").firstOrNull() ?: return null
+    private var sessionCookies: Map<String, String> = emptyMap()
+    private var loginAttempted = false
 
-        val title = select("h2,h3,.title,.post-title")
-            .text()
-            .trim()
-            .ifEmpty { a.text().trim() }
+    /**
+     * يسجل الدخول تلقائيًا باستخدام البيانات المحفوظة بالإعدادات.
+     * يكتشف أسماء حقول الفورم (email/password/csrf) تلقائيًا بدل ما يفترضها ثابتة،
+     * عشان يشتغل حتى لو الموقع غيّر أسماء الحقول.
+     */
+    private suspend fun ensureLoggedIn() {
+        if (sessionCookies.isNotEmpty() || loginAttempted) return
+        loginAttempted = true
 
-        if (title.isEmpty()) return null
+        val email = prefs?.getString("asia2tv_email", null)
+        val password = prefs?.getString("asia2tv_password", null)
+        if (email.isNullOrBlank() || password.isNullOrBlank()) return
 
-        val url = fixUrlNull(a.attr("href")) ?: return null
-        val poster = fixUrlNull(select("img").attr("src"))
+        try {
+            val loginPageResponse = app.get("$mainUrl/login")
+            val form = loginPageResponse.document.selectFirst("form") ?: return
 
-        return newTvSeriesSearchResponse(title, url, TvType.AsianDrama) {
-            posterUrl = poster
+            val actionAttr = form.attr("action")
+            val actionUrl = when {
+                actionAttr.isBlank() -> "$mainUrl/login"
+                actionAttr.startsWith("http") -> actionAttr
+                else -> fixUrlNull(actionAttr) ?: "$mainUrl/login"
+            }
+
+            val formData = HashMap<String, String>()
+
+            // نمسك أي حقول مخفية (زي CSRF token) ونحافظ على قيمتها الأصلية
+            form.select("input[type=hidden]").forEach { input ->
+                val name = input.attr("name")
+                if (name.isNotBlank()) formData[name] = input.attr("value")
+            }
+
+            // نكتشف اسم حقل الإيميل/اليوزر تلقائيًا
+            val emailFieldName = form.select("input[type=email], input[type=text]")
+                .firstOrNull()?.attr("name")
+            // نكتشف اسم حقل الباسوورد تلقائيًا
+            val passwordFieldName = form.select("input[type=password]")
+                .firstOrNull()?.attr("name")
+
+            if (emailFieldName.isNullOrBlank() || passwordFieldName.isNullOrBlank()) {
+                return // ما قدرنا نلاقي الحقول، لا نكمل تسجيل الدخول
+            }
+
+            formData[emailFieldName] = email
+            formData[passwordFieldName] = password
+
+            val loginResponse = app.post(
+                actionUrl,
+                data = formData,
+                cookies = loginPageResponse.cookies,
+                referer = "$mainUrl/login",
+                allowRedirects = true
+            )
+
+            val cookies = loginPageResponse.cookies + loginResponse.cookies
+            if (cookies.isNotEmpty()) {
+                sessionCookies = cookies
+            }
+        } catch (e: Exception) {
+            // نتجاهل الخطأ ونكمل بدون تسجيل دخول بدل ما نوقف التطبيق
         }
     }
 
@@ -45,79 +90,100 @@ class Asia2TV : MainAPI() {
         page: Int,
         request: MainPageRequest
     ): HomePageResponse {
+        ensureLoggedIn()
+        val doc = app.get(mainUrl, cookies = sessionCookies).document
+        val items = doc.select("article, div.post-item, .post-main")
+            .mapNotNull { it.toSearchResult() }
 
-        val doc = app.get(mainUrl).document
-
-        val items = doc.select(
-            "article, .post-home.cont, .post-item, .post-info"
-        ).mapNotNull {
-            it.toSearchResult()
-        }
-
-        return newHomePageResponse(
-            listOf(
-                HomePageList(
-                    "Asia2TV",
-                    items
-                )
+        return if (items.isNotEmpty()) {
+            newHomePageResponse(
+                HomePageList("Asia2TV", items)
             )
+        } else {
+            newHomePageResponse(emptyList())
+        }
+    }
+
+    private fun Element.toSearchResult(): SearchResponse? {
+        val link = select("a").firstOrNull() ?: return null
+        val href = fixUrlNull(link.attr("href")) ?: return null
+
+        val title = select(".title, h2, h3")
+            .text()
+            .trim()
+            .ifEmpty { link.text().trim() }
+
+        if (title.isBlank()) return null
+
+        val poster = fixUrlNull(
+            select("img").attr("src")
         )
+
+        return newTvSeriesSearchResponse(
+            title,
+            href,
+            TvType.AsianDrama
+        ) {
+            posterUrl = poster
+        }
     }
 
     override suspend fun search(
         query: String
     ): List<SearchResponse> {
+        ensureLoggedIn()
+        val doc = app.get("$mainUrl/?s=$query", cookies = sessionCookies).document
 
-        val url = "$mainUrl/?s=${query.replace(" ", "+")}"
-        val doc = app.get(url).document
-
-        return doc.select(
-            "article, .post-home.cont, .post-item, .post-info"
-        ).mapNotNull {
-            it.toSearchResult()
-        }
+        return doc.select("article, div.post-item, .post-main")
+            .mapNotNull { it.toSearchResult() }
     }
 
-    override suspend fun load(url: String): LoadResponse {
-
-        login()
-
-        val doc = app.get(url).document
+    override suspend fun load(
+        url: String
+    ): LoadResponse {
+        ensureLoggedIn()
+        val doc = app.get(url, cookies = sessionCookies).document
 
         val title = doc.select(
-            "h1, h1.entry-title, .post-title"
-        ).text().trim()
+            "h1.entry-title, .post-title, h1"
+        ).firstOrNull()?.text()?.trim()
+            ?: "Asia2TV"
 
         val poster = fixUrlNull(
-            doc.select("img").firstOrNull()?.attr("src")
+            doc.select(
+                ".poster img, .entry-content img, article img"
+            ).firstOrNull()?.attr("src")
         )
 
         val description = doc.select(
-            ".entry-content, .post-body, .story"
+            ".entry-content, .story, .post-content"
         ).text().trim()
 
         val episodes = ArrayList<Episode>()
 
-        doc.select(
+        val episodeLinks = doc.select(
+            "a[href*='/episode/'], " +
             "a[href*='episode'], " +
-            "a[href*='/p/'], " +
-            ".episodes-list a, " +
-            ".ep-list a"
-        ).forEachIndexed { index, element ->
+            ".episodes-list a"
+        )
 
-            val epUrl = fixUrlNull(element.attr("href"))
-                ?: return@forEachIndexed
+        if (episodeLinks.isNotEmpty()) {
+            episodeLinks.forEachIndexed { index, element ->
+                val epUrl = fixUrlNull(
+                    element.attr("href")
+                ) ?: return@forEachIndexed
 
-            episodes.add(
-                newEpisode(epUrl) {
-                    name = element.text().trim()
-                        .ifEmpty { "الحلقة ${index + 1}" }
-                    episode = index + 1
-                }
-            )
-        }
+                episodes.add(
+                    newEpisode(epUrl) {
+                        name = element.text()
+                            .trim()
+                            .ifEmpty { "الحلقة ${index + 1}" }
 
-        if (episodes.isEmpty()) {
+                        episode = index + 1
+                    }
+                )
+            }
+        } else {
             episodes.add(
                 newEpisode(url) {
                     name = title
@@ -143,19 +209,13 @@ class Asia2TV : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+        ensureLoggedIn()
+        val doc = app.get(data, cookies = sessionCookies).document
 
-        login()
-
-        val doc = app.get(data).document
-        var found = false
-
-        doc.select("iframe").forEach { iframe ->
-
+        doc.select("iframe, source, option[value*='http']").forEach { element ->
             val src = fixUrlNull(
-                iframe.attr("src")
+                element.attr("src").ifEmpty { element.attr("value") }
             ) ?: return@forEach
-
-            found = true
 
             loadExtractor(
                 src,
@@ -165,101 +225,6 @@ class Asia2TV : MainAPI() {
             )
         }
 
-        doc.select(
-            "video source, video"
-        ).forEach { video ->
-
-            val src = fixUrlNull(
-                video.attr("src").ifEmpty {
-                    video.attr("data-src")
-                }
-            ) ?: return@forEach
-
-            found = true
-
-            callback(
-                newExtractorLink(
-                    name,
-                    name,
-                    src,
-                    ExtractorLinkType.VIDEO
-                ) {
-                    referer = data
-                }
-            )
-        }
-
-        doc.select(
-            "a[href*='watch'], " +
-            "a[href*='embed'], " +
-            "a[href*='stream'], " +
-            "a[href*='player']"
-        ).forEach { link ->
-
-            val href = fixUrlNull(
-                link.attr("href")
-            ) ?: return@forEach
-
-            found = true
-
-            loadExtractor(
-                href,
-                data,
-                subtitleCallback,
-                callback
-            )
-        }
-
-        return found
-    }
-
-    private suspend fun login(): Boolean {
-
-        if (loggedIn) return true
-
-        return try {
-
-            val loginPage = app.get(
-                "$mainUrl/login"
-            )
-
-            val token = loginPage.document
-                .select("input[name=_token]")
-                .attr("value")
-
-            if (token.isEmpty()) {
-                loggedIn = false
-                return false
-            }
-
-            val response = app.submitForm(
-                url = "$mainUrl/login",
-                form = mapOf(
-                    "_token" to token,
-                    "email" to username,
-                    "password" to password
-                ),
-                headers = mapOf(
-                    "Referer" to "$mainUrl/login"
-                )
-            )
-
-            loggedIn = response.isSuccessful
-
-            loggedIn
-
-        } catch (e: Exception) {
-
-            loggedIn = false
-            false
-        }
-    }
-}
-
-@CloudstreamPlugin
-class Asia2TVPlugin : Plugin() {
-
-    override fun load(context: android.content.Context) {
-        registerMainAPI(Asia2TV())
+        return true
     }
 }
